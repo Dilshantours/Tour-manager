@@ -1,0 +1,15 @@
+body { font-family: 'Inter', sans-serif; }
+.tab-active { border-color: #4682B4; color: #4682B4; background-color: #F0F8FF; }
+.tab-inactive { border-color: transparent; }
+.calendar-day-head { height: 2.5rem; }
+.calendar-day { min-height: 120px; }
+.calendar-tour { font-size: 0.75rem; }
+.chart-container { position: relative; width: 100%; max-width: 500px; margin-left: auto; margin-right: auto; height: 300px; max-height: 350px; }
+@media (min-width: 768px) { .chart-container { height: 350px; max-height: 400px; } }
+.modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); justify-content: center; align-items: center; }
+.modal-content { background-color: #fefefe; margin: auto; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 90%; max-width: 500px; }
+.close-button { color: #aaa; float: right; font-size: 28px; font-weight: bold; }
+.close-button:hover, .close-button:focus { color: black; text-decoration: none; cursor: pointer; }
+.form-group label { display: block; margin-bottom: 4px; font-size: 0.875rem; font-weight: 500; }
+.form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+.loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); display: flex; justify-content: center; align-items: center; z-index: 1001; font-size: 1.2rem; color: #556B2F;}
