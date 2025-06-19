@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tour Operations Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Link to external style.css file -->
+    <link rel="stylesheet" href="style.css"> 
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Expose Firebase modules globally for use in the main script block
+        window.firebaseModules = {
+            initializeApp,
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            getFirestore,
+            collection,
+            onSnapshot,
+            doc,
+            setDoc,
+            addDoc,
+            updateDoc,
+            deleteDoc,
+            query,
+            where,
+            getDocs 
+        };
+    </script>
+    <!-- Chosen Palette: Calm Harmony -->
+    <!-- Application Structure Plan: A tab-based single-page application is the most intuitive structure for this use case. It allows the user to switch between different contexts (high-level dashboard, detailed tour management, resource availability, and scheduling) without leaving the page. The default view is 'Dashboard' for a quick operational summary. The 'Tours Manager' provides granular control over bookings. The 'Driver Roster' focuses on resource status. The 'Calendar' provides a visual, time-based overview. This structure directly maps to the user's primary tasks identified from the source report (checking status, managing bookings, assigning resources), making the workflow logical and efficient. -->
+    <!-- Visualization & Content Choices: 
+        - Dashboard Stats: Report Info(Tour counts, Driver Status) -> Goal(Inform) -> Viz(Dynamic text, Donut/Bar Charts) -> Interaction(Hover tooltips) -> Justification(Provides immediate, high-level KPIs) -> Library(Chart.js).
+        - Confirmed Tours: Report Info(Sheet 1) -> Goal(Organize/Inform) -> Viz(Interactive HTML Table) -> Interaction(Live search, status filtering, add/edit/delete functionality) -> Justification(Best for detailed, sortable data. Filters allow users to focus on specific tasks like managing 'Confirmed' vs 'Completed' tours, and direct editing is crucial for a live system. Now includes financial details and tour duration.) -> Library(Vanilla JS, Firestore).
+        - Driver Availability: Report Info(Sheet 2) -> Goal(Compare/Inform) -> Viz(Grid of Info Cards) -> Interaction(Status filtering via buttons, editable driver details, add/delete functionality) -> Justification(Cards offer a more visual and scannable way to check resource status than a table, and direct editing allows for updates to driver info. Adding/deleting drivers completes the resource management cycle.) -> Library(Vanilla JS, Firestore).
+        - Calendar Overview: Report Info(Sheet 3) -> Goal(Change/Relationships) -> Viz(HTML Grid-based Calendar) -> Interaction(Month navigation, hover details on tours) -> Justification(A visual calendar is the most effective way to understand scheduling, overlaps, and availability over time, dynamically updated from Firestore.) -> Library(Vanilla JS, HTML/Tailwind, Firestore).
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+</head>
+<body class="bg-[#F8F7F4] text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-6 lg:p-8">
+        
+        <header class="mb-6">
+            <h1 class="text-3xl md:text-4xl font-bold text-[#556B2F]">Tour Operations Dashboard</h1>
+            <p class="text-gray-600 mt-1">Manage your Sri Lankan tours, drivers, and schedule.</p>
+            <p id="user-id-display" class="text-sm text-gray-500 mt-2">Loading user ID...</p>
+        </header>
+
+        <nav class="mb-6 border-b border-gray-200">
+            <ul class="flex flex-wrap -mb-px">
+                <li><button id="tab-dashboard" class="nav-tab inline-block p-4 border-b-2 rounded-t-lg tab-active">Dashboard</button></li>
+                <li><button id="tab-tours" class="nav-tab inline-block p-4 border-b-2 rounded-t-lg tab-inactive">Tours Manager</button></li>
+                <li><button id="tab-drivers" class="nav-tab inline-block p-4 border-b-2 rounded-t-lg tab-inactive">Driver Roster</button></li>
+                <li><button id="tab-calendar" class="nav-tab inline-block p-4 border-b-2 rounded-t-lg tab-inactive">Calendar</button></li>
+            </ul>
+        </nav>
+
+        <main>
+            <!-- Dashboard View -->
+            <div id="view-dashboard" class="space-y-8">
+                 <div class="p-6 bg-white rounded-lg shadow-sm">
+                    <h2 class="text-xl font-semibold text-[#556B2F] mb-4">At a Glance</h2>
+                    <p class="text-gray-600 mb-6">This section provides a high-level summary of your current operations. Key metrics on tours and driver availability are displayed here to give you a quick snapshot of your business activity and resource allocation.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="bg-blue-50 p-5 rounded-lg text-center">
+                            <p class="text-sm text-blue-700 font-medium">Active Tours</p>
+                            <p id="stat-active-tours" class="text-3xl font-bold text-blue-900">0</p>
+                        </div>
+                        <div class="bg-green-50 p-5 rounded-lg text-center">
+                            <p class="text-sm text-green-700 font-medium">Available Drivers</p>
+                            <p id="stat-available-drivers" class="text-3xl font-bold text-green-900">0</p>
+                        </div>
+                        <div class="bg-yellow-50 p-5 rounded-lg text-center">
+                            <p class="text-sm text-yellow-700 font-medium">Upcoming Tours (7 Days)</p>
+                            <p id="stat-upcoming-tours" class="text-3xl font-bold text-yellow-900">0</p>
+                        </div>
+                        <div class="bg-indigo-50 p-5 rounded-lg text-center">
+                            <p class="text-sm text-indigo-700 font-medium">Completed This Month</p>
+                            <p id="stat-completed-tours" class="text-3xl font-bold text-indigo-900">0</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="p-6 bg-white rounded-lg shadow-sm">
+                        <h2 class="text-xl font-semibold text-[#556B2F] mb-2">Driver Status</h2>
+                         <p class="text-gray-600 mb-4">This chart shows the current breakdown of your driver roster by availability. Hover over a section to see the exact number of drivers in each category.</p>
+                        <div class="chart-container"><canvas id="driverStatusChart"></canvas></div>
+                    </div>
+                    <div class="p-6 bg-white rounded-lg shadow-sm">
+                        <h2 class="text-xl font-semibold text-[#556B2F] mb-2">Monthly Tour Volume</h2>
+                        <p class="text-gray-600 mb-4">This chart visualizes the number of confirmed tours scheduled per month, helping you identify busy periods and seasonal trends. </p>
+                        <div class="chart-container"><canvas id="tourVolumeChart"></canvas></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tours Manager View -->
+            <div id="view-tours" class="hidden space-y-6">
+                 <div class="p-6 bg-white rounded-lg shadow-sm">
+                     <h2 class="text-xl font-semibold text-[#556B2F] mb-4">Tours Manager</h2>
+                     <p class="text-gray-600 mb-6">Here you can view and manage all your tour bookings. Use the search bar to find a specific client or the filter buttons to narrow down the list by tour status. You can also add, edit, or delete tours directly.</p>
+                    <div class="flex flex-col md:flex-row gap-4 mb-4 items-center">
+                        <input type="text" id="tour-search" placeholder="Search by Client Name or Tour ID..." class="w-full md:w-1/3 p-2 border border-gray-300 rounded-lg">
+                        <div id="tour-status-filters" class="flex flex-wrap items-center gap-2">
+                            <button class="filter-btn-tour bg-[#4682B4] text-white px-4 py-2 rounded-lg" data-status="All">All</button>
+                            <button class="filter-btn-tour bg-white text-gray-700 px-4 py-2 rounded-lg border" data-status="Confirmed">Confirmed</button>
+                            <button class="filter-btn-tour bg-white text-gray-700 px-4 py-2 rounded-lg border" data-status="Completed">Completed</button>
+                            <button class="filter-btn-tour bg-white text-gray-700 px-4 py-2 rounded-lg border" data-status="Cancelled">Cancelled</button>
+                        </div>
+                        <button id="add-tour-btn" class="bg-[#556B2F] text-white px-4 py-2 rounded-lg ml-auto">Add New Tour</button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="p-3">Tour ID</th>
+                                    <th class="p-3">Client</th>
+                                    <th class="p-3">Dates</th>
+                                    <th class="p-3">Days</th>
+                                    <th class="p-3">Payment</th>
+                                    <th class="p-3">Commission</th>
+                                    <th class="p-3">Driver</th>
+                                    <th class="p-3">Vehicle</th>
+                                    <th class="p-3">Status</th>
+                                    <th class="p-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tours-table-body">
+                                <!-- JS will populate this -->
+                            </tbody>
+                        </table>
+                    </div>
+                 </div>
+            </div>
+
+            <!-- Driver Roster View -->
+            <div id="view-drivers" class="hidden space-y-6">
+                 <div class="p-6 bg-white rounded-lg shadow-sm">
+                    <h2 class="text-xl font-semibold text-[#556B2F] mb-4">Driver Roster</h2>
+                    <p class="text-gray-600 mb-6">This section provides a live overview of your driver and vehicle fleet. Use the filters to quickly see who is available, currently on a tour, or unavailable for other reasons. Each card provides key details for quick resource assignment and can be edited, or you can add new drivers to your team.</p>
+                    <div id="driver-status-filters" class="flex flex-wrap items-center gap-2 mb-4">
+                        <button class="filter-btn-driver bg-[#4682B4] text-white px-4 py-2 rounded-lg" data-status="All">All</button>
+                        <button class="filter-btn-driver bg-white text-gray-700 px-4 py-2 rounded-lg border" data-status="Available">Available</button>
+                        <button class="filter-btn-driver bg-white text-gray-700 px-4 py-2 rounded-lg border" data-status="Booked">Booked</button>
+                        <button class="filter-btn-driver bg-white text-gray-700 px-4 py-2 rounded-lg border" data-status="Maintenance">Maintenance</button>
+                        <button id="add-driver-btn" class="bg-[#556B2F] text-white px-4 py-2 rounded-lg ml-auto">Add New Driver</button>
+                    </div>
+                    <div id="driver-roster-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                        <!-- JS will populate this -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calendar View -->
+            <div id="view-calendar" class="hidden">
+                 <div class="p-6 bg-white rounded-lg shadow-sm">
+                    <h2 class="text-xl font-semibold text-[#556B2F] mb-4">Scheduling Calendar</h2>
+                    <p class="text-gray-600 mb-6">This interactive calendar provides a visual representation of all scheduled tours. You can navigate between months to check for availability, identify busy periods, and prevent scheduling conflicts. Tours are displayed across their duration, giving a clear view of driver and vehicle assignments over time.</p>
+                    <div class="flex justify-between items-center mb-4">
+                        <button id="prev-month" class="px-4 py-2 bg-[#D2B48C] text-white rounded-lg">&lt; Prev</button>
+                        <h3 id="calendar-month-year" class="text-lg font-semibold"></h3>
+                        <button id="next-month" class="px-4 py-2 bg-[#D2B48C] text-white rounded-lg">Next &gt;</button>
+                    </div>
+                    <div id="calendar-grid" class="grid grid-cols-7 gap-px bg-gray-200 border border-gray-200">
+                       <!-- JS will populate this -->
+                    </div>
+                 </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Tour Edit/Add Modal -->
+    <div id="tour-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h3 class="text-xl font-semibold mb-4" id="tour-modal-title">Add New Tour</h3>
+            <form id="tour-form" class="space-y-4">
+                <input type="hidden" id="tour-id-field">
+                <div class="form-group">
+                    <label for="tour-unique-id">Tour ID:</label>
+                    <input type="text" id="tour-unique-id" required class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="tour-client-name">Client Name:</label>
+                    <input type="text" id="tour-client-name" required class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="tour-contact">Contact Info:</label>
+                    <input type="text" id="tour-contact" class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="tour-start-date">Start Date:</label>
+                    <input type="date" id="tour-start-date" required class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="tour-end-date">End Date:</label>
+                    <input type="date" id="tour-end-date" required class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="tour-pax">Number of Pax:</label>
+                    <input type="number" id="tour-pax" min="1" required class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="tour-payment">Payment ($):</label>
+                    <input type="number" id="tour-payment" min="0" step="0.01" class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="tour-commission">Commission ($):</label>
+                    <input type="number" id="tour-commission" min="0" step="0.01" class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="tour-days-of-tour">Days of Tour:</label>
+                    <input type="number" id="tour-days-of-tour" readonly class="rounded-md bg-gray-100">
+                </div>
+                <div class="form-group">
+                    <label for="tour-vehicle-type">Vehicle Type:</label>
+                    <select id="tour-vehicle-type" required class="rounded-md">
+                        <option value="">Select Type</option>
+                        <option value="Car">Car</option>
+                        <option value="Van">Van</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="tour-driver-assigned">Driver Assigned:</label>
+                    <select id="tour-driver-assigned" required class="rounded-md"></select>
+                </div>
+                <div class="form-group">
+                    <label for="tour-vehicle-assigned">Vehicle Assigned:</label>
+                    <input type="text" id="tour-vehicle-assigned" required class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="tour-status">Tour Status:</label>
+                    <select id="tour-status" required class="rounded-md">
+                        <option value="Confirmed">Confirmed</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Cancelled">Cancelled</option>
+                        <option value="Pending Payment">Pending Payment</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="tour-notes">Notes:</label>
+                    <textarea id="tour-notes" rows="3" class="rounded-md"></textarea>
+                </div>
+                <div class="flex justify-end gap-2 mt-4">
+                    <button type="button" id="cancel-tour-btn" class="bg-gray-300 text-gray-800 px-4 py-2 rounded-lg">Cancel</button>
+                    <button type="submit" class="bg-[#556B2F] text-white px-4 py-2 rounded-lg">Save Tour</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Driver Edit/Add Modal -->
+    <div id="driver-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h3 class="text-xl font-semibold mb-4" id="driver-modal-title">Edit Driver Details</h3>
+            <form id="driver-form" class="space-y-4">
+                <input type="hidden" id="driver-id-field">
+                <div class="form-group">
+                    <label for="driver-name">Driver Name:</label>
+                    <input type="text" id="driver-name" required class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="driver-vehicle">Primary Vehicle:</label>
+                    <input type="text" id="driver-vehicle" class="rounded-md">
+                </div>
+                <div class="form-group">
+                    <label for="driver-type">Vehicle Type:</label>
+                    <select id="driver-type" required class="rounded-md">
+                        <option value="">Select Type</option>
+                        <option value="Car">Car</option>
+                        <option value="Van">Van</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="driver-remarks">Remarks:</label>
+                    <textarea id="driver-remarks" rows="3" class="rounded-md"></textarea>
+                </div>
+                <div class="flex justify-end gap-2 mt-4">
+                    <button type="button" id="cancel-driver-btn" class="bg-gray-300 text-gray-800 px-4 py-2 rounded-lg">Cancel</button>
+                    <button type="submit" class="bg-[#556B2F] text-white px-4 py-2 rounded-lg">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="loading-overlay" class="loading-overlay">
+        Loading data...
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', async function () {
+    const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, getDocs } = window.firebaseModules;
+
+    let db;
+    let auth;
+    let currentUserId = 'anonymous'; 
+    let currentDriversData = []; 
+    let currentToursData = [];   
+    let chartInstances = {}; 
+
+    let driversInitialLoadComplete = false;
+    let toursInitialLoadComplete = false;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); 
+    let currentCalendarDate = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    const tabs = document.querySelectorAll('.nav-tab');
+    const views = {
+        dashboard: document.getElementById('view-dashboard'),
+        tours: document.getElementById('view-tours'),
+        drivers: document.getElementById('view-drivers'),
+        calendar: document.getElementById('view-calendar'),
+    };
+    const loadingOverlay = document.getElementById('loading-overlay');
+
+    const tourModal = document.getElementById('tour-modal');
+    const tourForm = document.getElementById('tour-form');
+    const tourModalTitle = document.getElementById('tour-modal-title');
+    const tourIdField = document.getElementById('tour-id-field'); 
+    const tourUniqueIdField = document.getElementById('tour-unique-id'); 
+    const tourClientNameField = document.getElementById('tour-client-name');
+    const tourContactField = document.getElementById('tour-contact');
+    const tourStartDateField = document.getElementById('tour-start-date');
+    const tourEndDateField = document.getElementById('tour-end-date');
+    const tourPaxField = document.getElementById('tour-pax');
+    const tourPaymentField = document.getElementById('tour-payment'); // New field
+    const tourCommissionField = document.getElementById('tour-commission'); // New field
+    const tourDaysOfTourField = document.getElementById('tour-days-of-tour'); // New field
+    const tourVehicleTypeField = document.getElementById('tour-vehicle-type');
+    const tourDriverAssignedField = document.getElementById('tour-driver-assigned');
+    const tourVehicleAssignedField = document.getElementById('tour-vehicle-assigned');
+    const tourStatusField = document.getElementById('tour-status');
+    const tourNotesField = document.getElementById('tour-notes');
+    const addTourBtn = document.getElementById('add-tour-btn');
+    const cancelTourBtn = document.getElementById('cancel-tour-btn');
+
+    const driverModal = document.getElementById('driver-modal');
+    const driverForm = document.getElementById('driver-form');
+    const driverModalTitle = document.getElementById('driver-modal-title'); 
+    const driverIdField = document.getElementById('driver-id-field');
+    const driverNameField = document.getElementById('driver-name');
+    const driverVehicleField = document.getElementById('driver-vehicle');
+    const driverTypeField = document.getElementById('driver-type');
+    const driverRemarksField = document.getElementById('driver-remarks');
+    const addDriverBtn = document.getElementById('add-driver-btn'); 
+    const cancelDriverBtn = document.getElementById('cancel-driver-btn');
+
+    function showLoading() { loadingOverlay.style.display = 'flex'; }
+    function hideLoading() { loadingOverlay.style.display = 'none'; }
+
+    function checkAndHideLoading() {
+        if (driversInitialLoadComplete && toursInitialLoadComplete) {
+            hideLoading();
+        }
+    }
+
+    async function initializeFirebase() {
+        showLoading();
+        try {
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+                apiKey: "YOUR_ACTUAL_API_KEY", 
+                authDomain: "YOUR_PROJECT_ID.firebaseapp.com", 
+                projectId: "YOUR_PROJECT_ID", 
+                storageBucket: "YOUR_PROJECT_ID.appspot.com", 
+                messagingSenderId: "YOUR_MESSAGING_SENDER_ID", 
+                appId: "YOUR_APP_ID" 
+            };
+
+            if (!firebaseConfig.projectId || firebaseConfig.projectId === "YOUR_PROJECT_ID" || firebaseConfig.apiKey === "YOUR_ACTUAL_API_KEY") {
+                console.error("Firebase configuration is incomplete or uses placeholder values. Please update firebaseConfig with your actual project details from Firebase Console.");
+                document.getElementById('user-id-display').textContent = `Firebase Error: Configuration Missing or Invalid. Please set up your Firebase project and update the script.`;
+                hideLoading();
+                return; 
+            }
+
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+
+            if (typeof __initial_auth_token !== 'undefined') {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    currentUserId = user.uid;
+                    document.getElementById('user-id-display').textContent = `User ID: ${currentUserId}`;
+                    setupFirestoreListeners();
+                } else {
+                    currentUserId = 'anonymous';
+                    document.getElementById('user-id-display').textContent = `User ID: ${currentUserId} (signed out)`;
+                    currentToursData = [];
+                    currentDriversData = [];
+                    updateAllViews();
+                    hideLoading(); 
+                }
+            });
+
+        } catch (error) {
+            console.error("Error initializing Firebase or authenticating:", error);
+            document.getElementById('user-id-display').textContent = `Error: ${error.message}`;
+            hideLoading();
+        }
+    }
+
+    function setupFirestoreListeners() {
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const toursColRef = collection(db, `artifacts/${appId}/public/data/tours`);
+        const driversColRef = collection(db, `artifacts/${appId}/public/data/drivers`);
+
+        onSnapshot(toursColRef, (snapshot) => {
+            currentToursData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            updateAllViews();
+            toursInitialLoadComplete = true; 
+            checkAndHideLoading(); 
+        }, (error) => {
+            console.error("Error fetching tours:", error);
+            toursInitialLoadComplete = true; 
+            checkAndHideLoading();
+        });
+
+        onSnapshot(driversColRef, (snapshot) => {
+            currentDriversData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            populateDriverDropdown();
+            updateAllViews();
+            driversInitialLoadComplete = true; 
+            checkAndHideLoading(); 
+        }, (error) => {
+            console.error("Error fetching drivers:", error);
+            driversInitialLoadComplete = true; 
+            checkAndHideLoading();
+        });
+    }
+
+    function populateDriverDropdown() {
+        tourDriverAssignedField.innerHTML = '<option value="">Select Driver</option>';
+        currentDriversData.forEach(driver => {
+            const option = document.createElement('option');
+            option.value = driver.name;
+            option.textContent = driver.name;
+            tourDriverAssignedField.appendChild(option);
+        });
+    }
+
+    function switchView(viewId) {
+        Object.values(views).forEach(view => view.classList.add('hidden'));
+        tabs.forEach(tab => {
+            tab.classList.remove('tab-active');
+            tab.classList.add('tab-inactive');
+        });
+        
+        views[viewId].classList.remove('hidden');
+        document.getElementById(`tab-${viewId}`).classList.add('tab-active');
+        document.getElementById(`tab-${viewId}`).classList.remove('tab-inactive');
+        if (viewId === 'dashboard') {
+            renderCharts();
+        }
+    }
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const viewId = tab.id.split('-')[1];
+            switchView(viewId);
+        });
+    });
+
+    function getStatusClass(status) {
+        switch (status) {
+            case 'Confirmed': return 'bg-blue-100 text-blue-800';
+            case 'Completed': return 'bg-green-100 text-green-800';
+            case 'Cancelled': return 'bg-red-100 text-red-800';
+            case 'Available': return 'bg-green-100 text-green-800';
+            case 'Booked': return 'bg-yellow-100 text-yellow-800';
+            case 'Maintenance': return 'bg-gray-100 text-gray-800';
+            case 'Pending Payment': return 'bg-purple-100 text-purple-800';
+            default: return 'bg-gray-100 text-gray-800';
+        }
+    }
+
+    function formatDate(dateStr) {
+        if (!dateStr) return '';
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('en-CA');
+    }
+
+    function getDriverStatus(driverName) {
+        const driver = currentDriversData.find(d => d.name === driverName);
+        if (!driver) return { status: 'Unknown', availableFrom: '', remarks: '' };
+
+        const todayStr = today.toISOString().split('T')[0];
+        
+        let driverTours = currentToursData.filter(tour => 
+            tour.driverAssigned === driverName && 
+            tour.status === 'Confirmed'
+        );
+
+        driverTours.sort((a, b) => {
+            const dateA = new Date(a.startDate);
+            const dateB = new Date(b.startDate);
+            if (dateA.getTime() === dateB.getTime()) {
+                return new Date(a.endDate) - new Date(b.endDate);
+            }
+            return dateA - dateB;
+        });
+
+        let activeTourToday = null;
+        let nextBooking = null;
+        let latestConfirmedTourEndDate = null;
+
+        for (const tour of driverTours) {
+            const startDate = new Date(tour.startDate);
+            const endDate = new Date(tour.endDate);
+
+            if (today >= startDate && today <= endDate) {
+                activeTourToday = tour;
+                break;
+            }
+            if (startDate > today && (nextBooking === null || startDate < new Date(nextBooking.startDate))) {
+                nextBooking = tour;
+            }
+            if (endDate > today && (latestConfirmedTourEndDate === null || endDate > latestConfirmedTourEndDate)) {
+                latestConfirmedTourEndDate = endDate;
+            }
+        }
+        
+        if (driver.status === 'Maintenance') {
+            return { 
+                status: 'Maintenance', 
+                availableFrom: driver.availableFrom || '', 
+                remarks: driver.remarks || 'Vehicle undergoing maintenance' 
+            };
+        }
+
+        if (activeTourToday) {
+            const nextDay = new Date(activeTourToday.endDate);
+            nextDay.setDate(nextDay.getDate() + 1);
+            return {
+                status: 'Booked',
+                availableFrom: nextDay.toISOString().split('T')[0],
+                remarks: `On tour with ${activeTourToday.clientName}`
+            };
+        } else if (nextBooking) {
+            return {
+                status: 'Available',
+                availableFrom: nextBooking.startDate,
+                remarks: `Next booking: ${nextBooking.clientName} on ${formatDate(nextBooking.startDate)}`
+            };
+        } else {
+            return {
+                status: 'Available',
+                availableFrom: '',
+                remarks: 'No upcoming tours scheduled.'
+            };
+        }
+    }
+
+    function renderToursTable(filterText = '', filterStatus = 'All') {
+        const tableBody = document.getElementById('tours-table-body');
+        tableBody.innerHTML = '';
+
+        const filteredTours = currentToursData.filter(tour => {
+            const matchesText = tour.clientName.toLowerCase().includes(filterText.toLowerCase()) || 
+                               (tour.tourId && tour.tourId.toLowerCase().includes(filterText.toLowerCase()));
+            const matchesStatus = filterStatus === 'All' || tour.status === filterStatus;
+            return matchesText && matchesStatus;
+        });
+        
+        if (filteredTours.length === 0) {
+             tableBody.innerHTML = `<tr><td colspan="10" class="text-center p-6 text-gray-500">No tours found.</td></tr>`;
+             return;
+        }
+
+        filteredTours.forEach(tour => {
+            const row = document.createElement('tr');
+            row.className = 'border-b hover:bg-gray-50';
+            row.innerHTML = `
+                <td class="p-3 font-medium">${tour.tourId || 'N/A'}</td>
+                <td class="p-3">
+                    <div class="font-medium">${tour.clientName}</div>
+                    <div class="text-sm text-gray-500">${tour.contact || ''}</div>
+                </td>
+                <td class="p-3">${formatDate(tour.startDate)} - ${formatDate(tour.endDate)}</td>
+                <td class="p-3">${tour.daysOfTour || 'N/A'}</td>
+                <td class="p-3">${tour.payment !== undefined && tour.payment !== null ? '$' + tour.payment.toFixed(2) : 'N/A'}</td>
+                <td class="p-3">${tour.commission !== undefined && tour.commission !== null ? '$' + tour.commission.toFixed(2) : 'N/A'}</td>
+                <td class="p-3">${tour.driverAssigned || 'Unassigned'}</td>
+                <td class="p-3">${tour.vehicleAssigned || 'Unassigned'} (${tour.vehicleType || ''})</td>
+                <td class="p-3"><span class="px-2 py-1 text-xs font-medium rounded-full ${getStatusClass(tour.status)}">${tour.status}</span></td>
+                <td class="p-3">
+                    <button class="edit-tour-btn bg-yellow-200 text-yellow-800 px-3 py-1 rounded-lg text-xs mr-2" data-id="${tour.id}">Edit</button>
+                    <button class="delete-tour-btn bg-red-200 text-red-800 px-3 py-1 rounded-lg text-xs" data-id="${tour.id}">Delete</button>
+                </td>
+            `;
+            tableBody.appendChild(row);
+        });
+
+        document.querySelectorAll('.edit-tour-btn').forEach(button => {
+            button.addEventListener('click', (e) => openTourModalForEdit(e.target.dataset.id));
+        });
+        document.querySelectorAll('.delete-tour-btn').forEach(button => {
+            button.addEventListener('click', (e) => deleteTour(e.target.dataset.id));
+        });
+    }
+
+    function renderDriverRoster(filterStatus = 'All') {
+        const rosterGrid = document.getElementById('driver-roster-grid');
+        rosterGrid.innerHTML = '';
+        
+        const driversWithComputedStatus = currentDriversData.map(driver => {
+            const computedStatus = getDriverStatus(driver.name);
+            return { ...driver, ...computedStatus };
+        });
+
+        const filteredDrivers = driversWithComputedStatus.filter(driver => filterStatus === 'All' || driver.status === filterStatus);
+        
+        if (filteredDrivers.length === 0) {
+            rosterGrid.innerHTML = `<p class="text-center col-span-full p-6 text-gray-500">No drivers match this status.</p>`;
+            return;
+        }
+
+        filteredDrivers.forEach(driver => {
+            const card = document.createElement('div');
+            card.className = 'bg-white border rounded-lg p-4 shadow-sm';
+            let availabilityInfo = '';
+            if (driver.status === 'Booked' || driver.status === 'Maintenance') {
+                availabilityInfo = `<p class="text-xs text-gray-500 mt-1">Available from: ${formatDate(driver.availableFrom)}</p>`;
+            }
+
+            card.innerHTML = `
+                <div class="flex justify-between items-start">
+                    <h4 class="font-semibold">${driver.name}</h4>
+                    <span class="px-2 py-1 text-xs font-medium rounded-full ${getStatusClass(driver.status)}">${driver.status}</span>
+                </div>
+                <p class="text-sm text-gray-600">${driver.vehicle || 'N/A'} (${driver.type || 'N/A'})</p>
+                ${availabilityInfo}
+                <p class="text-xs text-gray-500 mt-2 italic">${driver.remarks || ''}</p>
+                <div class="flex justify-end gap-2 mt-3">
+                    <button class="edit-driver-btn bg-gray-200 text-gray-700 px-3 py-1 rounded-lg text-xs" data-id="${driver.id}">Edit Details</button>
+                    <button class="delete-driver-btn bg-red-200 text-red-800 px-3 py-1 rounded-lg text-xs" data-id="${driver.id}">Delete</button>
+                </div>
+            `;
+            rosterGrid.appendChild(card);
+        });
+
+        document.querySelectorAll('.edit-driver-btn').forEach(button => {
+            button.addEventListener('click', (e) => openDriverModalForEdit(e.target.dataset.id));
+        });
+        document.querySelectorAll('.delete-driver-btn').forEach(button => {
+            button.addEventListener('click', (e) => deleteDriver(e.target.dataset.id));
+        });
+    }
+    
+    function renderCalendar() {
+        const grid = document.getElementById('calendar-grid');
+        grid.innerHTML = '';
+
+        const year = currentCalendarDate.getFullYear();
+        const month = currentCalendarDate.getMonth();
+
+        document.getElementById('calendar-month-year').textContent = currentCalendarDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+        const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        daysOfWeek.forEach(day => {
+            const dayEl = document.createElement('div');
+            dayEl.className = 'calendar-day-head flex items-center justify-center bg-gray-100 font-semibold text-sm text-gray-600';
+            dayEl.textContent = day;
+            grid.appendChild(dayEl);
+        });
+
+        const firstDayOfMonth = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+        for (let i = 0; i < firstDayOfMonth; i++) {
+            grid.appendChild(document.createElement('div')).className = 'bg-gray-50';
+        }
+
+        for (let i = 1; i <= daysInMonth; i++) {
+            const dayCell = document.createElement('div');
+            dayCell.className = 'calendar-day bg-white p-2 border-t border-r border-gray-200 overflow-hidden relative';
+            dayCell.innerHTML = `<span class="text-sm font-medium">${i}</span>`;
+            
+            const currentDate = new Date(year, month, i);
+            currentDate.setHours(0,0,0,0);
+            
+            currentToursData.forEach(tour => {
+                if(tour.status !== 'Confirmed') return;
+
+                const tourStart = new Date(tour.startDate);
+                tourStart.setHours(0,0,0,0);
+                const tourEnd = new Date(tour.endDate);
+                tourEnd.setHours(0,0,0,0);
+
+                if (currentDate >= tourStart && currentDate <= tourEnd) {
+                    const tourEl = document.createElement('div');
+                    const color = 'bg-blue-500';
+                    tourEl.className = `calendar-tour text-white p-1 rounded my-1 truncate ${color}`;
+                    tourEl.textContent = tour.clientName;
+                    tourEl.title = `${tour.clientName} (${tour.driverAssigned || 'Unassigned'})`;
+                    dayCell.appendChild(tourEl);
+                }
+            });
+            
+            grid.appendChild(dayCell);
+        }
+    }
+
+    function updateDashboardStats() {
+        const todayStr = today.toISOString().split('T')[0];
+        const sevenDaysLater = new Date(today.getTime() + 7 * 86400000);
+        const sevenDaysLaterStr = sevenDaysLater.toISOString().split('T')[0];
+        const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+
+        const activeTours = currentToursData.filter(t => t.status === 'Confirmed' && t.startDate <= todayStr && t.endDate >= todayStr).length;
+        const availableDrivers = currentDriversData.filter(d => getDriverStatus(d.name).status === 'Available').length;
+        const upcomingTours = currentToursData.filter(t => t.status === 'Confirmed' && t.startDate > todayStr && t.startDate <= sevenDaysLaterStr).length;
+        const completedThisMonth = currentToursData.filter(t => t.status === 'Completed' && t.endDate >= firstDayOfMonth && t.endDate <= todayStr).length;
+
+        document.getElementById('stat-active-tours').textContent = activeTours;
+        document.getElementById('stat-available-drivers').textContent = availableDrivers;
+        document.getElementById('stat-upcoming-tours').textContent = upcomingTours;
+        document.getElementById('stat-completed-tours').textContent = completedThisMonth;
+    }
+    
+    function renderCharts() {
+        if (chartInstances.driverStatus) chartInstances.driverStatus.destroy();
+        if (chartInstances.tourVolume) chartInstances.tourVolume.destroy();
+
+        const driverStatusCtx = document.getElementById('driverStatusChart').getContext('2d');
+        const tourVolumeCtx = document.getElementById('tourVolumeChart').getContext('2d');
+        
+        const driverCounts = currentDriversData.reduce((acc, driver) => {
+            const status = getDriverStatus(driver.name).status;
+            acc[status] = (acc[status] || 0) + 1;
+            return acc;
+        }, {});
+        
+        chartInstances.driverStatus = new Chart(driverStatusCtx, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(driverCounts),
+                datasets: [{
+                    data: Object.values(driverCounts),
+                    backgroundColor: ['#90EE90', '#FFD700', '#D3D3D3', '#ADD8E6', '#87CEEB', '#FFB6C1'],
+                    borderColor: '#F8F7F4',
+                    borderWidth: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } }
+            }
+        });
+
+        const tourMonths = currentToursData.filter(t=>t.status==='Confirmed').reduce((acc, tour) => {
+            const month = new Date(tour.startDate).toLocaleString('default', { month: 'short', year: '2-digit' });
+            acc[month] = (acc[month] || 0) + 1;
+            return acc;
+        }, {});
+
+        const monthOrder = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const sortedMonths = Object.keys(tourMonths).sort((a, b) => {
+            const [monA, yearA] = a.split(' ');
+            const [monB, yearB] = b.split(' ');
+            const dateA = new Date(`01 ${monA} 20${yearA}`);
+            const dateB = new Date(`01 ${monB} 20${yearB}`);
+            return dateA - dateB;
+        });
+
+        const sortedCounts = sortedMonths.map(month => tourMonths[month]);
+
+        chartInstances.tourVolume = new Chart(tourVolumeCtx, {
+            type: 'bar',
+            data: {
+                labels: sortedMonths,
+                datasets: [{
+                    label: 'Confirmed Tours',
+                    data: sortedCounts,
+                    backgroundColor: '#4682B4',
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+            }
+        });
+    }
+
+    function updateAllViews() {
+        const activeFilterTour = document.querySelector('#tour-status-filters .bg-\\[\\#4682B4\\]')?.dataset.status || 'All';
+        const searchTxtTour = document.getElementById('tour-search').value;
+        renderToursTable(searchTxtTour, activeFilterTour);
+
+        const activeFilterDriver = document.querySelector('#driver-status-filters .bg-\\[\\#4682B4\\]')?.dataset.status || 'All';
+        renderDriverRoster(activeFilterDriver);
+        
+        renderCalendar();
+        updateDashboardStats();
+        renderCharts();
+    }
+
+    document.getElementById('tour-search').addEventListener('input', (e) => {
+        const activeFilter = document.querySelector('#tour-status-filters .bg-\\[\\#4682B4\\]').dataset.status;
+        renderToursTable(e.target.value, activeFilter);
+    });
+    
+    document.querySelectorAll('.filter-btn-tour').forEach(button => {
+        button.addEventListener('click', () => {
+            document.querySelectorAll('.filter-btn-tour').forEach(btn => {
+                btn.classList.remove('bg-[#4682B4]', 'text-white');
+                btn.classList.add('bg-white', 'text-gray-700', 'border');
+            });
+            button.classList.add('bg-[#4682B4]', 'text-white');
+            button.classList.remove('bg-white', 'text-gray-700', 'border');
+            const searchText = document.getElementById('tour-search').value;
+            renderToursTable(searchText, button.dataset.status);
+        });
+    });
+
+    document.querySelectorAll('.filter-btn-driver').forEach(button => {
+        button.addEventListener('click', () => {
+            document.querySelectorAll('.filter-btn-driver').forEach(btn => {
+                btn.classList.remove('bg-[#4682B4]', 'text-white');
+                btn.classList.add('bg-white', 'text-gray-700', 'border');
+            });
+            button.classList.add('bg-[#4682B4]', 'text-white');
+            button.classList.remove('bg-white', 'text-gray-700', 'border');
+            renderDriverRoster(button.dataset.status);
+        });
+    });
+
+    document.getElementById('prev-month').addEventListener('click', () => {
+        currentCalendarDate.setMonth(currentCalendarDate.getMonth() - 1);
+        renderCalendar();
+    });
+
+    document.getElementById('next-month').addEventListener('click', () => {
+        currentCalendarDate.setMonth(currentCalendarDate.getMonth() + 1);
+        renderCalendar();
+    });
+
+    addTourBtn.addEventListener('click', openTourModalForAdd);
+    cancelTourBtn.addEventListener('click', closeTourModal);
+    tourModal.querySelector('.close-button').addEventListener('click', closeTourModal);
+    window.addEventListener('click', (event) => {
+        if (event.target == tourModal) {
+            closeTourModal();
+        }
+        if (event.target == driverModal) {
+            closeDriverModal();
+        }
+    });
+
+    function calculateDaysOfTour() {
+        const startDate = tourStartDateField.value;
+        const endDate = tourEndDateField.value;
+        if (startDate && endDate) {
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const diffTime = Math.abs(end - start);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            tourDaysOfTourField.value = diffDays + 1; // +1 to include both start and end day
+        } else {
+            tourDaysOfTourField.value = '';
+        }
+    }
+
+    tourStartDateField.addEventListener('change', calculateDaysOfTour);
+    tourEndDateField.addEventListener('change', calculateDaysOfTour);
+
+    function openTourModal(tour = null) {
+        tourForm.reset();
+        tourIdField.value = ''; 
+        tourUniqueIdField.value = ''; 
+        tourUniqueIdField.readOnly = false; 
+        tourModalTitle.textContent = 'Add New Tour';
+        tourDriverAssignedField.innerHTML = '<option value="">Select Driver</option>';
+        populateDriverDropdown();
+
+        if (tour) {
+            tourModalTitle.textContent = 'Edit Tour';
+            tourIdField.value = tour.id; 
+            tourUniqueIdField.value = tour.tourId || ''; 
+            tourUniqueIdField.readOnly = true; 
+            tourClientNameField.value = tour.clientName || '';
+            tourContactField.value = tour.contact || '';
+            tourStartDateField.value = tour.startDate || '';
+            tourEndDateField.value = tour.endDate || '';
+            tourPaxField.value = tour.pax || '';
+            tourPaymentField.value = tour.payment !== undefined && tour.payment !== null ? tour.payment : ''; 
+            tourCommissionField.value = tour.commission !== undefined && tour.commission !== null ? tour.commission : ''; 
+            tourDaysOfTourField.value = tour.daysOfTour !== undefined && tour.daysOfTour !== null ? tour.daysOfTour : ''; 
+            tourVehicleTypeField.value = tour.vehicleType || '';
+            tourDriverAssignedField.value = tour.driverAssigned || '';
+            tourVehicleAssignedField.value = tour.vehicleAssigned || '';
+            tourStatusField.value = tour.status || 'Confirmed';
+            tourNotesField.value = tour.notes || '';
+        } else {
+            calculateDaysOfTour();
+        }
+        tourModal.style.display = 'flex';
+    }
+
+    function openTourModalForAdd() {
+        openTourModal();
+    }
+
+    function openTourModalForEdit(tourId) {
+        const tour = currentToursData.find(t => t.id === tourId);
+        if (tour) {
+            openTourModal(tour);
+        } else {
+            console.error('Tour not found:', tourId);
+        }
+    }
+
+    function closeTourModal() {
+        tourModal.style.display = 'none';
+    }
+
+    tourForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        showLoading();
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const toursColRef = collection(db, `artifacts/${appId}/public/data/tours`);
+
+        const tourData = {
+            tourId: tourUniqueIdField.value, 
+            clientName: tourClientNameField.value,
+            contact: tourContactField.value,
+            startDate: tourStartDateField.value,
+            endDate: tourEndDateField.value,
+            pax: parseInt(tourPaxField.value),
+            payment: tourPaymentField.value === '' ? null : parseFloat(tourPaymentField.value), 
+            commission: tourCommissionField.value === '' ? null : parseFloat(tourCommissionField.value), 
+            daysOfTour: parseInt(tourDaysOfTourField.value), 
+            vehicleType: tourVehicleTypeField.value,
+            driverAssigned: tourDriverAssignedField.value,
+            vehicleAssigned: tourVehicleAssignedField.value,
+            status: tourStatusField.value,
+            notes: tourNotesField.value
+        };
+
+        try {
+            if (tourIdField.value) { 
+                await updateDoc(doc(toursColRef, tourIdField.value), tourData);
+                console.log("Tour updated successfully!");
+            } else { 
+                const q = query(toursColRef, where("tourId", "==", tourData.tourId));
+                const querySnapshot = await getDocs(q);
+                if (!querySnapshot.empty) {
+                    alert('A tour with this Tour ID already exists. Please use a unique ID.');
+                    hideLoading();
+                    return;
+                }
+                await addDoc(toursColRef, tourData);
+                console.log("Tour added successfully!");
+            }
+            closeTourModal();
+        } catch (error) {
+            console.error("Error saving tour:", error);
+            alert(`Error saving tour: ${error.message}`);
+        } finally {
+            hideLoading();
+        }
+    });
+
+    async function deleteTour(tourId) {
+        if (!confirm('Are you sure you want to delete this tour?')) {
+            return;
+        }
+        showLoading();
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const toursColRef = collection(db, `artifacts/${appId}/public/data/tours`);
+        try {
+            await deleteDoc(doc(toursColRef, tourId));
+            console.log("Tour deleted successfully!");
+        } catch (error) {
+            console.error("Error deleting tour:", error);
+            alert(`Error deleting tour: ${error.message}`);
+        } finally {
+            hideLoading();
+        }
+    }
+
+    // Driver Modal Logic
+    addDriverBtn.addEventListener('click', openDriverModalForAdd);
+    cancelDriverBtn.addEventListener('click', closeDriverModal);
+    driverModal.querySelector('.close-button').addEventListener('click', closeDriverModal);
+
+    function openDriverModal(driver = null) {
+        driverForm.reset();
+        driverIdField.value = '';
+        driverModalTitle.textContent = 'Add New Driver';
+        driverNameField.readOnly = false;
+
+        if (driver) {
+            driverModalTitle.textContent = 'Edit Driver Details';
+            driverIdField.value = driver.id;
+            driverNameField.value = driver.name || '';
+            driverNameField.readOnly = true;
+            driverVehicleField.value = driver.vehicle || '';
+            driverTypeField.value = driver.type || '';
+            driverRemarksField.value = driver.remarks || '';
+        }
+        driverModal.style.display = 'flex';
+    }
+
+    function openDriverModalForAdd() {
+        openDriverModal();
+    }
+
+    function openDriverModalForEdit(driverId) {
+        const driver = currentDriversData.find(d => d.id === driverId);
+        if (driver) {
+            openDriverModal(driver);
+        } else {
+            console.error('Driver not found:', driverId);
+        }
+    }
+
+    function closeDriverModal() {
+        driverModal.style.display = 'none';
+    }
+
+    driverForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        showLoading();
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const driversColRef = collection(db, `artifacts/${appId}/public/data/drivers`);
+
+        const driverData = {
+            name: driverNameField.value,
+            vehicle: driverVehicleField.value,
+            type: driverTypeField.value,
+            remarks: driverRemarksField.value,
+        };
+
+        try {
+            if (driverIdField.value) {
+                await updateDoc(doc(driversColRef, driverIdField.value), driverData);
+                console.log("Driver updated successfully!");
+            } else {
+                const q = query(driversColRef, where("name", "==", driverData.name));
+                const querySnapshot = await getDocs(q);
+                if (!querySnapshot.empty) {
+                    alert('A driver with this name already exists. Please use a unique name.');
+                    hideLoading(); 
+                    return;
+                }
+                await addDoc(driversColRef, driverData);
+                console.log("Driver added successfully!");
+            }
+            closeDriverModal();
+        } catch (error) {
+            console.error("Error saving driver:", error);
+            alert(`Error saving driver: ${error.message}`);
+        } finally {
+            hideLoading();
+        }
+    });
+
+    async function deleteDriver(driverId) {
+        const driver = currentDriversData.find(d => d.id === driverId);
+        if (!driver) {
+            console.error('Driver not found for deletion:', driverId);
+            return;
+        }
+
+        const assignedTours = currentToursData.filter(tour => 
+            tour.driverAssigned === driver.name && 
+            tour.status === 'Confirmed'
+        );
+
+        if (assignedTours.length > 0) {
+            const tourList = assignedTours.map(t => `Tour ID: ${t.tourId}, Client: ${t.clientName}`).join('\n');
+            if (!confirm(`This driver is currently assigned to the following CONFIRMED tour(s):\n${tourList}\n\nAre you sure you want to delete this driver? Deleting them will unassign them from these tours.`)) {
+                return;
+            }
+        } else if (!confirm(`Are you sure you want to delete driver ${driver.name}? This action cannot be undone.`)) {
+            return;
+        }
+
+        showLoading();
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const driversColRef = collection(db, `artifacts/${appId}/public/data/drivers`);
+        const toursColRef = collection(db, `artifacts/${appId}/public/data/tours`);
+
+        try {
+            const batch = db.batch();
+            currentToursData.forEach(tour => {
+                if (tour.driverAssigned === driver.name) {
+                    const tourDocRef = doc(toursColRef, tour.id);
+                    batch.update(tourDocRef, { driverAssigned: '', vehicleAssigned: '', vehicleType: '' });
+                }
+            });
+            await batch.commit();
+
+            await deleteDoc(doc(driversColRef, driverId));
+            console.log("Driver deleted and tours unassigned successfully!");
+        } catch (error) {
+            console.error("Error deleting driver or unassigning tours:", error);
+            alert(`Error deleting driver: ${error.message}`);
+        } finally {
+            hideLoading();
+        }
+    }
+
+    initializeFirebase();
+});
+</script>
+</body>
+</html>
